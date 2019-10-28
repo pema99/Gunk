@@ -31,6 +31,12 @@ let makeToken tokenType =
       Column = s.Column - offset },
     s
 
+//Check if end of source is reached
+let isAtEnd : LexerM<bool> = state {
+  let! lexer = get
+  return lexer.Source.Length = 0
+}
+
 //Advance 1 character, updating the lexers state, and return this character
 let advance : LexerM<char> = state {
   let! lexer = get
@@ -43,18 +49,19 @@ let advance : LexerM<char> = state {
   return res
 }
 
+//Advance 1 character, ignore it
+let advanceIgnore : LexerM<unit> = state {
+  let! _ = advance
+  ()
+}
+
 //Peek the next character
 let peek : LexerM<char> = state {
   let! lexer = get
   return lexer.Source.[0]
 }
 
-//Check if end of source is reached
-let isAtEnd : LexerM<bool> = state {
-  let! lexer = get
-  return lexer.Source.Length = 0
-}
-
+//TODO: Make this tail-recursive
 //Keep advancing and appending yielded chars to a string while predicate holds
 let rec eatWhile pred : LexerM<string> = state {
   let! atEnd = isAtEnd
@@ -91,12 +98,19 @@ let eatString : LexerM<string> = state {
 
 //Advance one operator and return it
 let eatOperator : LexerM<Token> = state {
-  let! curr = advance
-  let tokenType = 
-    match curr with
-    | Operator op -> op
-    | _ -> raise <| LexerException ("Invalid operator", (0, 0))
-  return! makeToken tokenType
+  let rec matchOperator maxLen = state {
+    let! lexer = get
+    if lexer.Source.Length < maxLen then
+      return! matchOperator (maxLen-1)
+    else
+      match lexer.Source.[..maxLen-1] with
+      | Operator op ->
+        for i=0 to maxLen do
+          do! advanceIgnore
+        return! makeToken op
+      | _ -> return! matchOperator (maxLen-1)
+  }
+  return! matchOperator 3
 }
 
 //Advance one language atom, skipping whitespace, and returning None if end is reached
@@ -105,12 +119,16 @@ let rec eatAtom : LexerM<Token option> = state {
   if atEnd then return None
   else
     match! peek with
-    | Operator _ -> 
+    | OperatorStart -> 
       let! op = eatOperator
       return Some op
     | Alpha c ->
       let! iden = eatIdentifier
-      let! res = makeToken (Identifier iden)
+      let tokenType = 
+        match iden with
+        | Keyword k -> k
+        | _ -> Identifier iden 
+      let! res = makeToken tokenType
       return Some res
     | Numeric c ->
       let! num = eatNumber
@@ -121,7 +139,7 @@ let rec eatAtom : LexerM<Token option> = state {
       let! res = makeToken (String str)
       return Some res
     | Whitespace c -> 
-      let! _ = advance
+      do! advanceIgnore
       return! eatAtom
     | c -> 
       let! lexer = get
@@ -132,25 +150,37 @@ let rec eatAtom : LexerM<Token option> = state {
 
 //Run the lexer over the given source, returning a list of tokens
 let lex lexer =
-  let rec lexCont = state { 
+  let rec lexCont tokens = state {
     let! atEnd = isAtEnd
-    if atEnd then return []
+    if atEnd then return tokens
     else
       let! token = eatAtom
       match token with
-      | Some t -> 
-        let! next = lexCont
-        return t :: next
-      | None -> return []
+      | Some t -> return! lexCont (t :: tokens) 
+      | None -> return tokens
   }
-  lexCont lexer |> fst
+  lexCont [] lexer
+    |> fst
+    |> List.rev
 
 let init = {
   Line = 1
   Column = 1
-  Source = "let add a b = a + b"
+  Source = "
+i32 fib(i32 n) {
+  if n <= 1 {
+    n
+  }
+  else {
+    fib(n-1) + fib(n-2)
+  }
+}
+"
 }
 
-lex init |> printfn "%A"
-
+try
+  lex init |> printfn "%A"
+with
+  | LexerException (err, pos) ->
+    printfn "Error%A: %s" pos err
 //eatIdentifier "hello__%!" |> printfn "%A"
