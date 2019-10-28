@@ -105,7 +105,7 @@ let eatOperator : LexerM<Token> = state {
     else
       match lexer.Source.[..maxLen-1] with
       | Operator op ->
-        for i=0 to maxLen do
+        for i=0 to maxLen-1 do
           do! advanceIgnore
         return! makeToken op
       | _ -> return! matchOperator (maxLen-1)

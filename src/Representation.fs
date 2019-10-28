@@ -82,6 +82,28 @@ let operatorMap = Map [
   "&&", And
   "||", Or
   "^^", Xor
+  "->", Arrow
+]
+
+let keywordMap = Map [
+  "if",     If
+  "else",   Else
+  "func",   Func
+  "return", Return
+  "true",   True
+  "false",  False
+  "struct", Struct
+  "string", Str
+  "f32",    F32
+  "f64",    F64
+  "i8",     I8
+  "i16",    I16
+  "i32",    I32
+  "i64",    I64
+  "u8",     U8
+  "u16",    U16
+  "u32",    U32
+  "u64",    U64
 ]
 
 //Active pattern for matching tokens with single length
@@ -100,23 +122,7 @@ let (|OperatorStart|InvalidOperator|) c =
 
 //Active pattern for matching keywords
 let (|Keyword|_|) k =
-  match k with
-  | "if"     -> Some If
-  | "else"   -> Some Else
-  | "func"   -> Some Func
-  | "return" -> Some Return
-  | "true"   -> Some True
-  | "false"  -> Some False
-  | "struct" -> Some Struct
-  | "string" -> Some Str
-  | "f32"    -> Some F32
-  | "f64"    -> Some F64
-  | "i8"     -> Some I8
-  | "i16"    -> Some I16
-  | "i32"    -> Some I32
-  | "i64"    -> Some I64
-  | "u8"     -> Some U8
-  | "u16"    -> Some U16
-  | "u32"    -> Some U32
-  | "u64"    -> Some U64
-  | _ -> None
+  if keywordMap.ContainsKey k then
+    Some keywordMap.[k]
+  else
+    None
