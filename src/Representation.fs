@@ -7,6 +7,7 @@ type TokenType =
   | Slash
   | Asterisk
   | Power
+  | Modulo
   // Comparison operators
   | EqualEqual
   | Bang
@@ -60,21 +61,22 @@ type Token = {
 }
 
 let operatorMap = Map [
-  "+", Plus
-  "-", Minus 
-  "/", Slash
-  "*", Asterisk
-  "^", Power
-  "(", LeftParen
-  ")", RightParen
-  "{", LeftBrace
-  "}", RightBrace
-  "=", Equal
-  ",", Comma
-  ".", Dot
-  "!", Bang
-  ">", Greater
-  "<", Less
+  "+",  Plus
+  "-",  Minus 
+  "/",  Slash
+  "*",  Asterisk
+  "^",  Power
+  "%",  Modulo
+  "(",  LeftParen
+  ")",  RightParen
+  "{",  LeftBrace
+  "}",  RightBrace
+  "=",  Equal
+  ",",  Comma
+  ".",  Dot
+  "!",  Bang
+  ">",  Greater
+  "<",  Less
   "==", EqualEqual
   "!=", BangEqual
   ">=", GreaterEqual
@@ -126,3 +128,5 @@ let (|Keyword|_|) k =
     Some keywordMap.[k]
   else
     None
+
+

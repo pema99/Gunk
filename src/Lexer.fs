@@ -1,4 +1,5 @@
-﻿#nowarn "40"
+﻿module Lexer
+#nowarn "40"
 
 open Representation
 open Util
@@ -149,7 +150,12 @@ let rec eatAtom : LexerM<Token option> = state {
 }
 
 //Run the lexer over the given source, returning a list of tokens
-let lex lexer =
+let lex source =
+  let lexer = {
+    Line = 1
+    Column = 1
+    Source = source
+  }
   let rec lexCont tokens = state {
     let! atEnd = isAtEnd
     if atEnd then return tokens
@@ -162,25 +168,3 @@ let lex lexer =
   lexCont [] lexer
     |> fst
     |> List.rev
-
-let init = {
-  Line = 1
-  Column = 1
-  Source = "
-i32 fib(i32 n) {
-  if n <= 1 {
-    n
-  }
-  else {
-    fib(n-1) + fib(n-2)
-  }
-}
-"
-}
-
-try
-  lex init |> printfn "%A"
-with
-  | LexerException (err, pos) ->
-    printfn "Error%A: %s" pos err
-//eatIdentifier "hello__%!" |> printfn "%A"
