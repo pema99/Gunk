@@ -1,4 +1,4 @@
-module Representation
+module LexerRepr
 
 type TokenType = 
   // Algebraic operators
@@ -49,10 +49,16 @@ type TokenType =
   | U16
   | U32
   | U64
+  | Bool
+  | Unit
   // Literals and identifiers
   | String of string 
   | Number of float
   | Identifier of string
+  //Intrinsics
+  | Print
+  | PrintLine
+  | Clear
 
 type Token = {
   Type: TokenType
@@ -88,24 +94,29 @@ let operatorMap = Map [
 ]
 
 let keywordMap = Map [
-  "if",     If
-  "else",   Else
-  "func",   Func
-  "return", Return
-  "true",   True
-  "false",  False
-  "struct", Struct
-  "string", Str
-  "f32",    F32
-  "f64",    F64
-  "i8",     I8
-  "i16",    I16
-  "i32",    I32
-  "i64",    I64
-  "u8",     U8
-  "u16",    U16
-  "u32",    U32
-  "u64",    U64
+  "if",      If
+  "else",    Else
+  "func",    Func
+  "return",  Return
+  "true",    True
+  "false",   False
+  "struct",  Struct
+  "string",  Str
+  "f32",     F32
+  "f64",     F64
+  "i8",      I8
+  "i16",     I16
+  "i32",     I32
+  "i64",     I64
+  "u8",      U8
+  "u16",     U16
+  "u32",     U32
+  "u64",     U64
+  "bool",    Bool
+  "unit",    Unit
+  "print",   Print
+  "println", PrintLine
+  "cls",     Clear
 ]
 
 //Active pattern for matching tokens with single length
@@ -129,4 +140,15 @@ let (|Keyword|_|) k =
   else
     None
 
+//Lexer exceptions
+exception LexerException of string * (int * int)
 
+//State of lexer at any point
+type LexerState = {
+  Line: int
+  Column: int
+  Source: string
+}
+
+//Monadic type for lexer state
+type LexerM<'T> = State.StateM<'T, LexerState>

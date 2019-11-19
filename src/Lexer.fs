@@ -1,7 +1,7 @@
 ﻿module Lexer
 #nowarn "40"
 
-open Representation
+open LexerRepr
 open Util
 open State
 

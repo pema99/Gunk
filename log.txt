@@ -1,0 +1,9 @@
+([VarDeclStmt ("a",I8,BinaryExpr (NumberExpr 2.0,Plus,NumberExpr 3.0));
+  VarDeclStmt ("b",U8,BinaryExpr (NumberExpr 3.0,Asterisk,NumberExpr 2.0));
+  FuncDeclStmt
+    ("fib",I32,[("lmao", I32)],
+     [VarDeclStmt ("c",I32,NumberExpr 2.0);
+      ExprStmt (BinaryExpr (NumberExpr 2.0,Plus,NumberExpr 5.0))])],
+ { Line = 7
+   Column = 2
+   Tokens = [] })
