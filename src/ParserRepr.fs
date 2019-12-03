@@ -39,23 +39,23 @@ let tokenToExprType token =
 
 //Expressions
 type Expr =
-  | BoolExpr of bool
+  | BoolExpr   of bool
   | StringExpr of string
   | NumberExpr of double 
-  | UnaryExpr of TokenType * Expr
+  | UnaryExpr  of TokenType * Expr
   | BinaryExpr of Expr * TokenType * Expr
   | VarGetExpr of string
-  | CallExpr of string * Expr list
-  | CondExpr of Expr * Stmt list * Stmt list
-  | IndexExpr of string * Expr
+  | CallExpr   of string * Expr list
+  | CondExpr   of Expr * Stmt list * Stmt list
+  | IndexExpr  of string * Expr
 //| MatchExpr of (Pattern * Expr) list 
 
 and Stmt =
-  | ExprStmt of Expr
-  | VarDeclStmt of string * ExprType * Expr
+  | ExprStmt     of Expr
+  | VarDeclStmt  of string * ExprType * Expr
   | FuncDeclStmt of string * ExprType * (string * ExprType) list * Stmt list
-  | BlockStmt of Stmt list
-  | PrintStmt of bool * Expr
+  | BlockStmt    of Stmt list
+  | PrintStmt    of bool * Expr
   | ClearStmt
 
 type Precedence =
@@ -93,6 +93,12 @@ type ParserState = {
   Tokens: Token list
 }
 
+type ParserResult<'T> =
+  | Success of 'T
+  | Failure
+  | FailureWith of string
+  | CompoundFailure of string list
+
 //Monadic type for parser state, parser combinators
 type ParserM<'T> = State.StateM<'T, ParserState>
-type ParserCombinator = ParserM<Expr>
+type Combinator<'T> = ParserM<ParserResult<'T>>

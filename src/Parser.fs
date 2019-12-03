@@ -13,7 +13,7 @@ let fail : ParserM<unit> = state {
   raise <| ParserException ("Unexpected token", (parser.Line, parser.Column))
 }
 
-let unpackOrFail operand : ParserM<'a> = state {
+let unwrap operand : ParserM<'a> = state {
   let! parser = get
   if Option.isNone operand then
     do! fail
@@ -74,22 +74,32 @@ let eat expected : ParserM<unit> = state {
 }
 
 // --- Expression parsing ---
-let parseUnaryExpr parseExpr : ParserCombinator = state {
-  let! op = advance
-  let! expr = parseExpr Precedence.Unary
-  return UnaryExpr (op, expr)
+let parseUnaryExpr parseExpr : Combinator<Expr> = state {
+  match! peek with
+  | Minus | Plus | Bang ->
+    let! op = advance
+    let! expr = parseExpr Precedence.Unary
+    return UnaryExpr (op, expr) |> Success
+  | _ -> return Failure
 }
 
-let parseNumberExpr parseExpr : ParserCombinator = state {
-  let! (Number n) = advance
-  return NumberExpr n
+let parseNumberExpr parseExpr : Combinator<Expr> = state {
+  match! peek with
+  | Number _ ->
+    let! (Number n) = advance
+    return NumberExpr n |> Success
+  | _ -> return Failure
 }
 
-let parseGroupExpr parseExpr : ParserCombinator = state {
-  do! eat LeftParen
-  let! expr = parseExpr Precedence.None
-  do! eat RightParen
-  return expr
+let parseGroupExpr parseExpr : Combinator<Expr> = state {
+  match! peek with
+  | LeftParen ->
+    do! advanceIgnore
+    let! expr = parseExpr Precedence.None
+    match! check RightParen with
+    | true -> return Success expr
+    | false -> return FailureWith "Unmatched paranthesis"
+  | _ -> return Failure
 }
 
 let getPrefixParser token =
@@ -100,10 +110,50 @@ let getPrefixParser token =
   | LeftParen -> Some parseGroupExpr
   | _ -> None
 
-let parseBinaryExpr parseExpr left : ParserCombinator = state {
-  let! op = advance
-  let! right = parseExpr (getInfixPrecedence op)
-  return BinaryExpr (left, op, right)
+let combineFailures a b =
+  match a, b with
+  | Failure, CompoundFailure _ | Failure, FailureWith _
+  | Success _, CompoundFailure _ | Success _, FailureWith _ -> b
+  | CompoundFailure _, Failure | FailureWith _, Failure
+  | CompoundFailure _, Success _ | FailureWith _, Success _ -> a
+  | FailureWith msg, CompoundFailure lst
+  | CompoundFailure lst, FailureWith msg -> CompoundFailure (msg :: lst)
+  | FailureWith l, FailureWith r -> CompoundFailure [l; r]
+  | CompoundFailure l, CompoundFailure r -> CompoundFailure (l @ r)
+  | _ -> Failure
+
+let ( >>= ) (m: Combinator<'T>) (f: 'T -> ParserResult<'T>) : Combinator<'T> =
+  fun s ->
+    let a, b = m s
+    match a with
+    | Success v -> f v, b  
+    | _ -> a, b
+
+let ( <* ) (m1: Combinator<'T>) (m2: Combinator<'T>) : Combinator<'T> =
+  fun s ->
+    let a1, b1 = m1 s
+    let a2, b2 = m2 b1
+    match a1, a2 with
+    | Success _, Success _ -> a1, b2
+    | _ -> combineFailures a1 a2, b2
+  
+let ( *> ) a b =
+  b <* a
+
+let ( <|> ) (m1: Combinator<'T>) (m2: Combinator<'T>) : Combinator<'T> =
+  fun s ->
+    let a1, b1 = m1 s
+    match a1 with
+    | Success _ | FailureWith _ | CompoundFailure _ -> a1, b1
+    | Failure -> m2 b1
+      
+let parseBinaryExpr parseExpr left : Combinator<Expr> = state {
+  match! peek with
+  | Plus | Minus | Asterisk | Slash ->
+    let! op = advance
+    let right = parseExpr (getInfixPrecedence op)
+    return! (right >>= (fun x -> BinaryExpr (left, op, x) |> Success)) 
+  | _ -> return Failure
 }
 
 let getOtherfixParser token =
@@ -114,16 +164,20 @@ let getOtherfixParser token =
 let rec parseExpr precedence = state {
   let! parser = get
   let! first = peek
-  let! prefix = getPrefixParser first |> unpackOrFail
-  let! left = prefix parseExpr
-  let rec loop (left: Expr) = state {
-    let! cont = checkPred (fun x -> precedence < getInfixPrecedence x)
-    if cont then
-      let! next = peek
-      let! otherfix = getOtherfixParser next |> unpackOrFail
-      let! left = otherfix parseExpr left
-      return! loop left
-    else return left
+  let! left =
+    parseUnaryExpr parseExpr
+    <|> parseNumberExpr parseExpr
+    <|> parseGroupExpr parseExpr
+  let rec loop (left: ParserResult<Expr>) = state {
+    match left with
+    | Success left ->
+      let! cont = checkPred (fun x -> precedence < getInfixPrecedence x)
+      if cont then
+        let! next = peek
+        let! left = parseBinaryExpr parseExpr left
+        return! loop left
+      else return left
+    | _ -> return left
   }
   return! loop left
 }
@@ -132,13 +186,13 @@ let rec parseExpr precedence = state {
 let parseVarSignature : ParserM<string * ExprType> = state {
   //Type, identifier
   let! typed = advance
-  let! typed = typed |> tokenToExprType |> unpackOrFail
+  let! typed = typed |> tokenToExprType |> unwrap
   let! iden = advance
   let nameOpt =
     match iden with
     | Identifier iden -> Some iden
     | _ -> None
-  let! name = unpackOrFail nameOpt
+  let! name = unwrap nameOpt
   return name, typed
 }
 
