@@ -13,11 +13,13 @@ let fail : ParserM<unit> = state {
   raise <| ParserException ("Unexpected token", (parser.Line, parser.Column))
 }
 
-let unpackOrFail operand : ParserM<'a> = state {
+let unwrap operand : ParserM<'a> = state {
   let! parser = get
   if Option.isNone operand then
     do! fail
-  return Option.get operand
+    return Option.get operand
+  else
+    return Option.get operand
 }
 
 //Check if end of source is reached
@@ -80,6 +82,31 @@ let parseUnaryExpr parseExpr : ParserCombinator = state {
   return UnaryExpr (op, expr)
 }
 
+let parseIdentifierExpr parseExpr : ParserCombinator = state {
+  let! (Identifier iden) = advance
+  match! peek with
+  | LeftParen ->
+    do! eat LeftParen
+    match! peek with
+    | RightParen ->
+      do! eat RightParen
+      return CallExpr (iden, [])
+    | _ ->
+      let rec loop acc : ParserM<Expr list> = state {
+        match! peek with
+        | Comma ->
+          do! eat Comma
+          let! expr = parseExpr Precedence.None
+          return! loop (expr :: acc)
+        | _ -> return List.rev acc
+      }
+      let! first = parseExpr Precedence.None
+      let! parms = loop [first]
+      do! eat RightParen
+      return CallExpr(iden, parms)
+  | _ -> return VarGetExpr iden
+}
+
 let parseNumberExpr parseExpr : ParserCombinator = state {
   let! (Number n) = advance
   return NumberExpr n
@@ -95,7 +122,7 @@ let parseGroupExpr parseExpr : ParserCombinator = state {
 let getPrefixParser token =
   match token with
   | Plus | Minus | Bang -> Some parseUnaryExpr
-  //| Identifier _ -> Some parseName
+  | Identifier _ -> Some parseIdentifierExpr
   | Number _ -> Some parseNumberExpr
   | LeftParen -> Some parseGroupExpr
   | _ -> None
@@ -114,13 +141,13 @@ let getOtherfixParser token =
 let rec parseExpr precedence = state {
   let! parser = get
   let! first = peek
-  let! prefix = getPrefixParser first |> unpackOrFail
+  let! prefix = getPrefixParser first |> unwrap
   let! left = prefix parseExpr
   let rec loop (left: Expr) = state {
     let! cont = checkPred (fun x -> precedence < getInfixPrecedence x)
     if cont then
       let! next = peek
-      let! otherfix = getOtherfixParser next |> unpackOrFail
+      let! otherfix = getOtherfixParser next |> unwrap
       let! left = otherfix parseExpr left
       return! loop left
     else return left
@@ -132,13 +159,13 @@ let rec parseExpr precedence = state {
 let parseVarSignature : ParserM<string * ExprType> = state {
   //Type, identifier
   let! typed = advance
-  let! typed = typed |> tokenToExprType |> unpackOrFail
+  let! typed = typed |> tokenToExprType |> unwrap
   let! iden = advance
   let nameOpt =
     match iden with
     | Identifier iden -> Some iden
     | _ -> None
-  let! name = unpackOrFail nameOpt
+  let! name = unwrap nameOpt
   return name, typed
 }
 
@@ -249,6 +276,10 @@ u8 b = 3 * 2
 i32 fib(i32 lmao, u32 test) {
   i32 c = 2
   2 + 5
+  i32 c = fib
+  fib()
+  fib(1)
+  fib(1,2)
   println (5+2)
 }
 "
