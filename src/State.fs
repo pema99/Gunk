@@ -8,22 +8,22 @@ let set state =
   fun _ -> (), state
 
 type StateBuilder() =
-  member this.Zero () =
-    fun s -> (), s
   member this.Return (v: 'T) : StateM<'T, 'S> =
     fun s -> v, s
   member this.ReturnFrom (m: StateM<'T, 'S>) : StateM<'T, 'S> =
     m
+  member this.Zero () : StateM<unit, 'S> =
+    this.Return ()
   member this.Bind (m: StateM<'T, 'S>, f: 'T -> StateM<'U, 'S>) : StateM<'U, 'S> =
     fun s ->
       let (a, n) = m s
       (f a) n
   member this.Combine (m1: StateM<'T, 'S>, m2: StateM<'U, 'S>) : StateM<'U, 'S> =
     fun s ->
-      let (a, n) = m1 s
+      let (_, n) = m1 s
       m2 n
   member this.Delay (f: unit -> StateM<'T, 'S>): StateM<'T, 'S> =
-    f ()
+    this.Bind (this.Return (), f)
   member this.For (coll: 'T seq, f: 'T -> StateM<'U, 'S>) =
     coll
       |> Seq.map f
