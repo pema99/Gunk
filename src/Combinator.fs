@@ -94,11 +94,24 @@ let many (v: Com<'T>) : Com<'T list> = com {
   return res
 }
 
-let some (v: Com<'T>) : Com<'T list> = com {
+let many1 (v: Com<'T>) : Com<'T list> = com {
   let! res = many v
   if res.Length = 0 then return! fail()
   else return res
 }
+
+let opt (p: Com<'T>) : Com<'T option> =
+  (p |>> Some) <|> just None
+
+let between (l: Com<'T>) (v: Com<'U>) (r: Com<'V>) : Com<'U> =
+  l *> v <* r
+
+let sepBy1 (p: Com<'T>) (sep: Com<'U>) : Com<'T list> =
+  p <+> many (sep *> p)
+  |>> List.Cons
+
+let sepBy (p: Com<'T>) (sep: Com<'U>) : Com<'T list> =
+  sepBy1 p sep <|> just []
 
 let look : Com<TokenType> = com {
   let! parser = com.get

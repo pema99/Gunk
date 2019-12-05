@@ -80,16 +80,23 @@ let rec parseExpr prec : Com<Expr> = com {
   return! loop left
 }
 
-// --- Statement parsing
-//TODO: No false positives here
+// --- Statement parsing ---
 let parseVarSignature : Com<string * ExprType> =
-  let typed = item >>= tokenToExprType
+  let typeTokens = [
+    TokenType.U8; TokenType.U16; TokenType.U32; TokenType.U64
+    TokenType.I8; TokenType.I16; TokenType.I32; TokenType.I64
+    TokenType.F32; TokenType.F64; TokenType.Str; TokenType.Bool
+    TokenType.Unit
+  ]
+  let typed = (oneOf typeTokens <|> identifierP) >>= tokenToExprType
   let iden = identifierP |>> fun (Identifier n) -> n 
   typed <+> iden |>> flip 
 
+let parseBlock parseStmt : Com<Stmt list> =
+  one LeftBrace *> many parseStmt <* one RightBrace
+
 let parseBlockStmt parseStmt : Com<Stmt> =
-  (one LeftBrace *> many (parseStmt) <* one RightBrace)
-  |>> BlockStmt
+  BlockStmt <&> parseBlock parseStmt
 
 let parsePrintStmt parseExpr : Com<Stmt> =
   let printP t b =
@@ -100,67 +107,45 @@ let parsePrintStmt parseExpr : Com<Stmt> =
 let parseClearStmt : Com<Stmt> =
   one Clear |>> fun _ -> ClearStmt  
 
-//parseTypedStmt
+let parseTypedStmt parseExpr parseStmt : Com<Stmt> =
+  let variableP (name, typed) =
+    one Equal
+    *> parseExpr Precedence.None
+    |>> fun x -> VarDeclStmt (name, typed, x)
+  let funcP (name, typed) =
+    let parmsP =
+      between
+        (one LeftParen)
+        (sepBy parseVarSignature (one Comma))
+        (one RightParen)
+    parmsP <+> parseBlock parseStmt
+    |>> fun (parms, body) -> FuncDeclStmt (name, typed, parms, body) 
+  parseVarSignature >>= fun x -> (variableP x <|> funcP x)
 
 let rec parseStmt : Com<Stmt> = com {
   return! 
     parseBlockStmt parseStmt
+    <|> parseTypedStmt parseExpr parseStmt
     <|> parsePrintStmt parseExpr
     <|> parseClearStmt
     <|> (parseExpr Precedence.None |>> ExprStmt)
 }
 
+let parse = many parseStmt
+
 let test = {
-  Tokens = Lexer.lex "{ 2 + 3 print 2 println 5 }"
+  Tokens = Lexer.lex "
+i32 fib (i32 n) {
+  print 2+3
+}"
   Line = 1
   Column = 1
 }
 
-parseStmt test |> printfn "%A"
+
+parse test |> printfn "%A"
 
 (*
-let parseTypedStmt parseExpr parseStmt : ParserM<Stmt> = state {
-  let! name, typed = parseVarSignature
-  let! next = advance
-  match next with
-  | Equal ->
-    //Variable
-    let! expr = parseExpr Precedence.None
-    return VarDeclStmt (name, typed, expr)
-  | LeftParen ->
-    //Param list
-    let rec loop acc = state {
-      let! atEnd = check RightParen
-      if atEnd then
-        return acc
-      else
-        let! name, typed = parseVarSignature
-        let! hasComma = check Comma
-        if hasComma then
-          do! eat Comma
-          return! loop ((name, typed) :: acc)
-        else
-          return (name, typed) :: acc
-    }
-    let! parms = loop []
-    do! eat RightParen
-    let! body = parseBlock parseStmt
-    return FuncDeclStmt (name, typed, List.rev parms, body)
-}
-
-// --- Parser ---
-let parse = state {
-  let rec loop acc = state {
-    let! atEnd = isAtEnd
-    if not atEnd then
-      let! stmt = parseStmt
-      return! loop (stmt :: acc) 
-    else
-      return List.rev acc
-  }
-  return! loop []
-}
-
 let parser = {
   Line = 1
   Column = 1
