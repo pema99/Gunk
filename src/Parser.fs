@@ -8,73 +8,6 @@ open Util
 open State
 
 // --- Helper functions ---
-let fail : ParserM<unit> = state {
-  let! parser = get
-  raise <| ParserException ("Unexpected token", (parser.Line, parser.Column))
-}
-
-let unwrap operand : ParserM<'a> = state {
-  let! parser = get
-  if Option.isNone operand then
-    do! fail
-    return Option.get operand
-  else
-    return Option.get operand
-}
-
-//Check if end of source is reached
-let isAtEnd : ParserM<bool> = state {
-  let! parser = get
-  return parser.Tokens.Length = 0
-}
-
-//Advance 1 character, updating the parsers state, and return this character
-let advance : ParserM<TokenType> = state {
-  let! parser = get
-  let res = parser.Tokens.[0]
-  do! set { parser with 
-              Tokens = parser.Tokens.[1..]
-              Line = res.Line
-              Column = res.Column }
-  return res.Type
-}
-
-//Advance 1 character, ignore it
-let advanceIgnore : ParserM<unit> = state {
-  let! _ = advance
-  ()
-}
-
-//Peek the next character
-let peek : ParserM<TokenType> = state {
-  let! parser = get
-  return parser.Tokens.[0].Type
-}
-
-//Match next character
-let checkPred pred : ParserM<bool> = state {
-  let! atEnd = isAtEnd
-  if atEnd then
-    return false
-  else
-    let! next = peek
-    return pred next
-}
-
-//Match next characer with character
-let check expected : ParserM<bool> = state {
-  return! checkPred ((=) expected)
-}
-
-//Match next character and ignore it, throw if not valid
-let eat expected : ParserM<unit> = state {
-  let! next = peek
-  if next = expected then
-    do! advanceIgnore
-  else
-    do! fail
-}
-
 type ParserResult<'T> =
   | Success of 'T
   | Failure
@@ -101,6 +34,9 @@ let ( <&> ) (f: 'T -> 'U) (m: Com<'T>) : Com<'U> = state {
   | Failure -> return Failure
 }
 
+let ( |>> ) (m: Com<'T>) (f: 'T -> 'U) : Com<'U> =
+  f <&> m
+
 let ( <* ) (m1: Com<'T>) (m2: Com<'U>) : Com<'T> = state {
   let! a = m1
   match a with
@@ -119,6 +55,17 @@ let ( *> ) (m1: Com<'T>) (m2: Com<'U>) : Com<'U> = state {
     let! b = m2
     match b with
     | Success _ -> return b
+    | _ -> return Failure
+  | _ -> return Failure
+}
+
+let ( <+> ) (m1: Com<'T>) (m2: Com<'U>) : Com<'T * 'U> = state {
+  let! a = m1
+  match a with
+  | Success v1 ->
+    let! b = m2
+    match b with
+    | Success v2 -> return Success (v1, v2)
     | _ -> return Failure
   | _ -> return Failure
 }
@@ -171,7 +118,7 @@ let item : Com<TokenType> = state {
     return Failure
 }
 
-let satisfy (pred: TokenType -> bool) : Com<TokenType>  = state {
+let satisfy (pred: TokenType -> bool) : Com<TokenType> = state {
   match! look with
   | Success v ->
     if pred v then
@@ -181,17 +128,29 @@ let satisfy (pred: TokenType -> bool) : Com<TokenType>  = state {
   | Failure -> return Failure
 }
 
-let one (tar: TokenType) : Com<TokenType> = state {
-  return! satisfy ((=) tar)
+let check (pred: TokenType -> bool) : Com<bool> = state {
+  match! look with
+  | Success v ->
+    if pred v then
+      return Success true
+    else return Success false
+  | Failure -> return Success false
 }
 
-let oneOf (lst: TokenType list) : Com<TokenType> = state {
-  return! satisfy (fun x -> List.contains x lst)
-}
+let one (tar: TokenType) : Com<TokenType> =
+  satisfy ((=) tar)
 
-let number : Com<TokenType> = state {
-  return! satisfy (fun x -> match x with Number _ -> true | _ -> false)
-}
+let oneOf (lst: TokenType list) : Com<TokenType> =
+  satisfy (fun x -> List.contains x lst)
+
+let numberP : Com<TokenType> = 
+  satisfy (fun x -> match x with Number _ -> true | _ -> false)
+
+let stringP : Com<TokenType> =
+  satisfy (fun x -> match x with String _ -> true | _ -> false)
+
+let identifierP : Com<TokenType> = 
+  satisfy (fun x -> match x with Identifier _ -> true | _ -> false)
 
 let chainL (p: Com<'T>) (op: Com<'T -> 'T -> 'T>) : Com<'T> = state {
   match! op with
@@ -208,118 +167,115 @@ let chainL (p: Com<'T>) (op: Com<'T -> 'T -> 'T>) : Com<'T> = state {
   | Failure -> return Failure
 }
 
-let test = {
-  Line = 1
-  Column = 1
-  Tokens = Lexer.lex "+9"
-}
+// --- Expression combinators ---
+let numberExpr : Com<Expr> =
+  numberP
+  |>> fun (Number n) -> NumberExpr n
+
+let boolExpr : Com<Expr> =
+  oneOf [True; False]
+  |>> fun b -> match b with True -> BoolExpr true | False -> BoolExpr false
+
+let stringExpr : Com<Expr> =
+  stringP
+  |>> fun (String s) -> StringExpr s
+
+let valueExpr _ : Com<Expr> =
+  numberExpr <|> boolExpr <|> stringExpr
+
+let groupExpr expr : Com<Expr> =
+  one LeftParen *> expr Precedence.None <* one RightParen
 
 let unaryOp op parseExpr : Com<Expr> =
   fun x -> UnaryExpr (op, x)
   <&> one op
   *> parseExpr Precedence.None
-  
-let boolNegateOp = unaryOp Bang
-let numNegateOp = unaryOp Minus
-let numIdentityOp = unaryOp Plus
 
 let unaryExpr parseExpr : Com<Expr> =
-  boolNegateOp parseExpr
-  <|> numNegateOp parseExpr
-  <|> numIdentityOp parseExpr
+  unaryOp Bang parseExpr
+  <|> unaryOp Minus parseExpr
+  <|> unaryOp Plus parseExpr
 
-let binaryOp op parseExpr : Com<Expr> =
+let binaryOp op parseExpr left : Com<Expr> =
+  one op
+  *> parseExpr (getInfixPrecedence op)
+  |>> fun x -> BinaryExpr (left, op, x)
 
-let numberExpr parseExpr : Com<Expr> =
-  fun (Number n) -> NumberExpr n
-  <&> number
-
-let rec expr prec : Com<Expr> = state {
-  return! unaryExpr expr <|> numberExpr expr
-}
-
-(expr Precedence.None) test |> printfn "%A"
+let binaryExpr parseExpr left : Com<Expr> =
+  binaryOp Plus parseExpr left
+  <|> binaryOp Minus parseExpr left
+  <|> binaryOp Asterisk parseExpr left
+  <|> binaryOp Slash parseExpr left
 
 // --- Expression parsing ---
-let parseUnaryExpr parseExpr : ParserCombinator = state {
-  let! op = advance
-  let! expr = parseExpr Precedence.Unary
-  return UnaryExpr (op, expr)
-}
-
-let parseIdentifierExpr parseExpr : ParserCombinator = state {
-  let! (Identifier iden) = advance
-  match! peek with
-  | LeftParen ->
-    do! eat LeftParen
-    match! peek with
-    | RightParen ->
-      do! eat RightParen
-      return CallExpr (iden, [])
-    | _ ->
-      let rec loop acc : ParserM<Expr list> = state {
-        match! peek with
-        | Comma ->
-          do! eat Comma
-          let! expr = parseExpr Precedence.None
-          return! loop (expr :: acc)
-        | _ -> return List.rev acc
-      }
-      let! first = parseExpr Precedence.None
-      let! parms = loop [first]
-      do! eat RightParen
-      return CallExpr(iden, parms)
-  | _ -> return VarGetExpr iden
-}
-
-let parseNumberExpr parseExpr : ParserCombinator = state {
-  let! (Number n) = advance
-  return NumberExpr n
-}
-
-let parseGroupExpr parseExpr : ParserCombinator = state {
-  do! eat LeftParen
-  let! expr = parseExpr Precedence.None
-  do! eat RightParen
-  return expr
-}
-
-let getPrefixParser token =
+let getPrefixParser token : Com<_> = state {
   match token with
-  | Plus | Minus | Bang -> Some parseUnaryExpr
-  | Identifier _ -> Some parseIdentifierExpr
-  | Number _ -> Some parseNumberExpr
-  | LeftParen -> Some parseGroupExpr
-  | _ -> None
-
-let parseBinaryExpr parseExpr left : ParserCombinator = state {
-  let! op = advance
-  let! right = parseExpr (getInfixPrecedence op)
-  return BinaryExpr (left, op, right)
+  | Plus | Minus | Bang -> return Success unaryExpr
+  //| Identifier _ -> Some identifierExpr
+  | Number _ | String _ | True | False -> return Success valueExpr
+  | LeftParen -> return Success groupExpr
+  | _ -> return Failure
 }
 
-let getOtherfixParser token =
+let getOtherfixParser token : Com<_> = state {
   match token with
-  | Plus | Minus | Asterisk | Slash -> Some parseBinaryExpr
-  | _ -> None
+  | Plus | Minus | Asterisk | Slash -> return Success binaryExpr
+  | _ -> return Failure
+}
 
-let rec parseExpr precedence = state {
-  let! parser = get
-  let! first = peek
-  let! prefix = getPrefixParser first |> unwrap
+
+type ComBuilder() =
+  member this.Return (v: 'T) : Com<'T> =
+    fun s -> Success v, s
+  member this.ReturnFrom (m: Com<'T>) : Com<'T> =
+    m
+  member this.Zero () : Com<unit> =
+    this.Return ()
+  member this.Bind (m: Com<'T>, f: 'T -> Com<'U>) : Com<'U> =
+    fun s ->
+      let a, n = m s
+      match a with
+      | Success v -> (f v) n
+      | Failure -> Failure, n
+  member this.Combine (m1: Com<'T>, m2: Com<'U>) : Com<'U> =
+    fun s ->
+      let a, n = m1 s
+      match a with
+      | Success _ ->
+        let b, n = m2 n
+        match b with
+        | Success _ -> b, n 
+        | Failure -> Failure, n
+      | Failure -> Failure, n
+  member this.Delay (f: unit -> Com<'T>): Com<'T> =
+    this.Bind (this.Return (), f)
+
+let com = ComBuilder()
+
+let rec parseExpr prec : Com<Expr> = com {
+  let! first = look
+  let! prefix = getPrefixParser first
   let! left = prefix parseExpr
-  let rec loop (left: Expr) = state {
-    let! cont = checkPred (fun x -> precedence < getInfixPrecedence x)
+  let rec loop (left: Expr) : Com<Expr> = com {
+    let! cont = check (fun x -> prec < getInfixPrecedence x)
     if cont then
-      let! next = peek
-      let! otherfix = getOtherfixParser next |> unwrap
+      let! next = look
+      let! otherfix = getOtherfixParser next
       let! left = otherfix parseExpr left
       return! loop left
-    else return left
+    else return left  
   }
   return! loop left
 }
 
+let test = {
+  Line = 1
+  Column = 1
+  Tokens = Lexer.lex "5+9"
+}
+
+parseExpr Precedence.None test |> printfn "%A"
+(*
 // --- Statement parsing ---
 let parseVarSignature : ParserM<string * ExprType> = state {
   //Type, identifier
@@ -450,4 +406,4 @@ i32 fib(i32 lmao, u32 test) {
 "
 }
 
-parse parser |> printfn "%A" 
+parse parser |> printfn "%A" *)
