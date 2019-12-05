@@ -29,3 +29,5 @@ let (|Alphanumeric|_|) c =
 let (|Whitespace|_|) c =
   if isWhitespace c then Some c
   else None
+
+let flip (a, b) = b, a

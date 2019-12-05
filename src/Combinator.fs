@@ -18,26 +18,26 @@ type ComBuilder() =
       let a, n = m s
       match a with
       | Success v -> (f v) n
-      | Failure -> Failure, n
+      | err -> copyFailure err, n
   member this.Combine (m1: Com<'T>, m2: Com<'U>) : Com<'U> =
     fun s ->
       let a, n = m1 s
       match a with
-      | Success _ ->
-        let b, n = m2 n
-        match b with
-        | Success _ -> b, n 
-        | Failure -> Failure, n
-      | Failure -> Failure, n
+      | Success _ -> m2 n
+      | err -> copyFailure err, n
   member this.Delay (f: unit -> Com<'T>): Com<'T> =
     this.Bind (this.Return (), f)
+  member this.get =
+    fun s -> Success s, s
+  member this.set v =
+    fun _ -> Success (), v
 
 let com = ComBuilder()
 
 let ( <|> ) (m1: Com<'T>) (m2: Com<'T>) : Com<'T> = state {  
   match! m1 with
   | Success v -> return Success v
-  | Failure -> return! m2
+  | _ -> return! m2
 }
 
 let ( <*> ) (f: Com<'T -> 'U>) (m: Com<'T>) : Com<'U> = com {
@@ -54,95 +54,79 @@ let ( <&> ) (f: 'T -> 'U) (m: Com<'T>) : Com<'U> = com {
 let ( |>> ) (m: Com<'T>) (f: 'T -> 'U) : Com<'U> =
   f <&> m
 
-let ( <* ) (m1: Com<'T>) (m2: Com<'U>) : Com<'T> = state {
+let ( <* ) (m1: Com<'T>) (m2: Com<'U>) : Com<'T> = com {
   let! a = m1
-  match a with
-  | Success _ ->
-    let! b = m2
-    match b with
-    | Success _ -> return a
-    | _ -> return Failure
-  | _ -> return Failure
+  let! b = m2
+  return a
 }
-  
-let ( *> ) (m1: Com<'T>) (m2: Com<'U>) : Com<'U> = state {
+ 
+let ( *> ) (m1: Com<'T>) (m2: Com<'U>) : Com<'U> = com {
   let! a = m1
-  match a with
-  | Success _ ->
-    let! b = m2
-    match b with
-    | Success _ -> return b
-    | _ -> return Failure
-  | _ -> return Failure
+  let! b = m2
+  return b
 }
 
-let ( <+> ) (m1: Com<'T>) (m2: Com<'U>) : Com<'T * 'U> = state {
+let ( <+> ) (m1: Com<'T>) (m2: Com<'U>) : Com<'T * 'U> = com {
   let! a = m1
-  match a with
-  | Success v1 ->
-    let! b = m2
-    match b with
-    | Success v2 -> return Success (v1, v2)
-    | _ -> return Failure
-  | _ -> return Failure
+  let! b = m2
+  return a, b
 }
 
-let ( >>= ) (m1: Com<'T>) (f: 'T -> Com<'U>) : Com<'U> = state {
-  match! m1 with
-  | Success v -> return! f v
-  | Failure -> return Failure
-}
+let ( >>= ) (m: Com<'T>) (f: 'T -> Com<'U>) : Com<'U> =
+  com.Bind (m, f)
 
 let just (a: 'T) : Com<'T> =
-  fun s ->
-    Success a, s
+  com.Return a
 
-let many (v: Com<'T>) : Com<'T list> = state {
+let fail () : Com<'T> =
+  fun s -> Failure, s
+
+let failWith msg : Com<'T> =
+  fun s -> FailureWith (ParserError (msg, (s.Line, s.Column))), s
+
+let many (v: Com<'T>) : Com<'T list> = com {
   let rec loop acc = state {
     match! v with
     | Success v -> return! loop (v :: acc)
-    | Failure -> return List.rev acc
+    | _ -> return Success (List.rev acc)
   }
   let! res = loop []
-  return Success res
+  return res
 }
 
-let some (v: Com<'T>) : Com<'T list> = state {
-  let! (Success res) = many v
-  if res.Length = 0 then return Failure
-  else return Success res
+let some (v: Com<'T>) : Com<'T list> = com {
+  let! res = many v
+  if res.Length = 0 then return! fail()
+  else return res
 }
 
-let look : Com<TokenType> = state {
-  let! parser = get
+let look : Com<TokenType> = com {
+  let! parser = com.get
+  if parser.Tokens.Length > 0 then
+    return parser.Tokens.[0].Type
+  else
+    return! fail()
+}
+
+let item : Com<TokenType> = com { 
+  let! parser = com.get
   if parser.Tokens.Length > 0 then
     let res = parser.Tokens.[0]
-    return Success res.Type
+    do! com.set { parser with 
+                    Tokens = parser.Tokens.[1..]
+                    Line = res.Line
+                    Column = res.Column }
+    return res.Type
   else
-    return Failure
+    return! fail()
 }
 
-let item : Com<TokenType> = state { 
-  let! parser = get
-  if parser.Tokens.Length > 0 then
-    let res = parser.Tokens.[0]
-    do! set { parser with 
-                Tokens = parser.Tokens.[1..]
-                Line = res.Line
-                Column = res.Column }
-    return Success res.Type
-  else
-    return Failure
-}
-
-let satisfy (pred: TokenType -> bool) : Com<TokenType> = state {
-  match! look with
-  | Success v ->
-    if pred v then
-      let! _ = item
-      return Success v
-    else return Failure
-  | Failure -> return Failure
+let satisfy (pred: TokenType -> bool) : Com<TokenType> = com {
+  let! next = look
+  if pred next then
+    let! _ = item
+    return next
+  else return! fail()
 }
 
 let check (pred: TokenType -> bool) : Com<bool> = state {
@@ -169,17 +153,13 @@ let stringP : Com<TokenType> =
 let identifierP : Com<TokenType> = 
   satisfy (fun x -> match x with Identifier _ -> true | _ -> false)
 
-let chainL (p: Com<'T>) (op: Com<'T -> 'T -> 'T>) : Com<'T> = state {
-  match! op with
-  | Success f ->
+let chainL (p: Com<'T>) (op: Com<'T -> 'T -> 'T>) : Com<'T> = com {
+  let! f = op
+  let! first = p 
+  let rec loop prev = state {
     match! p with
-    | Success first ->
-      let rec loop prev = state {
-        match! p with
-        | Success curr -> return! loop (f prev curr)
-        | Failure -> return Success prev
-      }
-      return! loop first
-    | Failure -> return Failure
-  | Failure -> return Failure
+    | Success curr -> return! loop (f prev curr)
+    | Failure -> return Success prev
+  }
+  return! loop first
 }

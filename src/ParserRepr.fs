@@ -3,6 +3,50 @@ module ParserRepr
 open LexerRepr
 open State
 
+//Parser exceptions
+type ParserError = string * (int * int)
+
+//State of parser at any point
+type ParserState = {
+  Line: int
+  Column: int
+  Tokens: Token list
+}
+
+type ParserResult<'T> =
+  | Success of 'T
+  | Failure
+  | FailureWith of ParserError
+  | CompoundFailure of ParserError list 
+
+let combineFailure a b =
+  match a, b with
+  | Success _, Success _                 -> Failure
+  | Success _, Failure
+  | Success _, FailureWith _
+  | Success _, CompoundFailure _         -> b 
+  | Failure, Success _         
+  | Failure, Failure                     -> Failure
+  | Failure, FailureWith _
+  | Failure, CompoundFailure _           -> b
+  | FailureWith _, Success _
+  | FailureWith _, Failure               -> a
+  | FailureWith l, FailureWith r         -> CompoundFailure [l; r] 
+  | FailureWith l, CompoundFailure r     -> CompoundFailure (l :: r)
+  | CompoundFailure _, Success _
+  | CompoundFailure _, Failure           -> a
+  | CompoundFailure l, FailureWith r     -> CompoundFailure (r :: l)
+  | CompoundFailure l, CompoundFailure r -> CompoundFailure (l @ r)
+
+let copyFailure a =
+  match a with
+  | Success _         -> Failure
+  | Failure           -> Failure
+  | FailureWith e     -> FailureWith e
+  | CompoundFailure e -> CompoundFailure e
+  
+type Com<'T> = StateM<ParserResult<'T>, ParserState>
+
 type ExprType =
   | Void         // Empty set
   | Unit         // Singleton set
@@ -20,23 +64,24 @@ type ExprType =
   | Bool
   | Struct of string
 
-let tokenToExprType token =
-  match token with
-  | TokenType.Unit            -> Some Unit
-  | TokenType.U8              -> Some U8
-  | TokenType.U16             -> Some U16
-  | TokenType.U32             -> Some U32
-  | TokenType.U64             -> Some U64
-  | TokenType.I8              -> Some I8
-  | TokenType.I16             -> Some I16
-  | TokenType.I32             -> Some I32
-  | TokenType.I64             -> Some I64
-  | TokenType.F32             -> Some F32
-  | TokenType.F64             -> Some F64
-  | TokenType.Str             -> Some Str
-  | TokenType.Bool            -> Some Bool
-  | TokenType.Identifier name -> Some (Struct name)
-  | _ -> None
+let tokenToExprType token : Com<ExprType> =
+  fun s ->
+    (match token with
+    | TokenType.Unit            -> Success Unit
+    | TokenType.U8              -> Success U8
+    | TokenType.U16             -> Success U16
+    | TokenType.U32             -> Success U32
+    | TokenType.U64             -> Success U64
+    | TokenType.I8              -> Success I8
+    | TokenType.I16             -> Success I16
+    | TokenType.I32             -> Success I32
+    | TokenType.I64             -> Success I64
+    | TokenType.F32             -> Success F32
+    | TokenType.F64             -> Success F64
+    | TokenType.Str             -> Success Str
+    | TokenType.Bool            -> Success Bool
+    | TokenType.Identifier name -> Success (Struct name)
+    | _ -> Failure), s
 
 //Expressions
 type Expr =
@@ -84,20 +129,3 @@ let getInfixPrecedence token =
   | Asterisk | Slash | Modulo                 -> Precedence.Product
   | _                                         -> Precedence.None
 
-//Parser exceptions
-type ParserError = string * (int * int)
-
-//State of parser at any point
-type ParserState = {
-  Line: int
-  Column: int
-  Tokens: Token list
-}
-
-type ParserResult<'T> =
-  | Success of 'T
-  | Failure
-  | FailureWith of ParserError
-  | CompoundFailure of ParserError list 
-
-type Com<'T> = StateM<ParserResult<'T>, ParserState>

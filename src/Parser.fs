@@ -49,22 +49,20 @@ let binaryExpr parseExpr left : Com<Expr> =
   <|> binaryOp Slash parseExpr left
 
 // --- Expression parsing ---
-let getPrefixParser token : Com<_> = state {
+let getPrefixParser token : Com<_> = com {
   match token with
-  | Plus | Minus | Bang -> return Success unaryExpr
+  | Plus | Minus | Bang -> return unaryExpr
   //| Identifier _ -> Some identifierExpr
-  | Number _ | String _ | True | False -> return Success valueExpr
-  | LeftParen -> return Success groupExpr
-  | _ -> return Failure
+  | Number _ | String _ | True | False -> return valueExpr
+  | LeftParen -> return groupExpr
+  | _ -> return! fail()
 }
 
-let getOtherfixParser token : Com<_> = state {
+let getOtherfixParser token : Com<_> = com {
   match token with
-  | Plus | Minus | Asterisk | Slash -> return Success binaryExpr
-  | _ -> return Failure
+  | Plus | Minus | Asterisk | Slash -> return binaryExpr
+  | _ -> return! fail()
 }
-
-
 
 let rec parseExpr prec : Com<Expr> = com {
   let! first = look
@@ -82,48 +80,45 @@ let rec parseExpr prec : Com<Expr> = com {
   return! loop left
 }
 
+// --- Statement parsing
+//TODO: No false positives here
+let parseVarSignature : Com<string * ExprType> =
+  let typed = item >>= tokenToExprType
+  let iden = identifierP |>> fun (Identifier n) -> n 
+  typed <+> iden |>> flip 
+
+let parseBlockStmt parseStmt : Com<Stmt> =
+  (one LeftBrace *> many (parseStmt) <* one RightBrace)
+  |>> BlockStmt
+
+let parsePrintStmt parseExpr : Com<Stmt> =
+  let printP t b =
+    one t *> parseExpr Precedence.None
+    |>> fun x -> PrintStmt(b, x)
+  printP Print false <|> printP PrintLine true
+
+let parseClearStmt : Com<Stmt> =
+  one Clear |>> fun _ -> ClearStmt  
+
+//parseTypedStmt
+
+let rec parseStmt : Com<Stmt> = com {
+  return! 
+    parseBlockStmt parseStmt
+    <|> parsePrintStmt parseExpr
+    <|> parseClearStmt
+    <|> (parseExpr Precedence.None |>> ExprStmt)
+}
+
 let test = {
+  Tokens = Lexer.lex "{ 2 + 3 print 2 println 5 }"
   Line = 1
   Column = 1
-  Tokens = Lexer.lex "5+9"
 }
 
-parseExpr Precedence.None test |> printfn "%A"
+parseStmt test |> printfn "%A"
+
 (*
-// --- Statement parsing ---
-let parseVarSignature : ParserM<string * ExprType> = state {
-  //Type, identifier
-  let! typed = advance
-  let! typed = typed |> tokenToExprType |> unwrap
-  let! iden = advance
-  let nameOpt =
-    match iden with
-    | Identifier iden -> Some iden
-    | _ -> None
-  let! name = unwrap nameOpt
-  return name, typed
-}
-
-let parseBlock parseStmt : ParserM<Stmt list> = state {
-  do! eat LeftBrace
-  let rec loop acc = state {
-    let! atEnd = check RightBrace
-    if atEnd then
-      return acc
-    else
-      let! stmt = parseStmt
-      return! loop (stmt :: acc)
-  }
-  let! body = loop []
-  do! eat RightBrace
-  return List.rev body
-}
-
-let parseBlockStmt parseExpr parseStmt : ParserM<Stmt> = state {
-  let! block = parseBlock parseStmt
-  return BlockStmt block
-}
-
 let parseTypedStmt parseExpr parseStmt : ParserM<Stmt> = state {
   let! name, typed = parseVarSignature
   let! next = advance
@@ -151,42 +146,6 @@ let parseTypedStmt parseExpr parseStmt : ParserM<Stmt> = state {
     do! eat RightParen
     let! body = parseBlock parseStmt
     return FuncDeclStmt (name, typed, List.rev parms, body)
-}
-
-let parsePrintStmt parseExpr parseStmt : ParserM<Stmt> = state {
-  let! next = advance
-  let! expr = parseExpr Precedence.None
-  match next with
-  | Print -> return PrintStmt (false, expr)
-  | PrintLine -> return PrintStmt (true, expr)
-}
-
-let parseClearStmt parseExpr parseStmt : ParserM<Stmt> = state {
-  do! eat Clear
-  return ClearStmt
-}
-
-let getStmtParser token =
-  match token with
-  | TokenType.U8   | TokenType.U16 | TokenType.U32
-  | TokenType.U64  | TokenType.I8  | TokenType.I16
-  | TokenType.I32  | TokenType.I64 | TokenType.Unit
-  | TokenType.Bool | TokenType.F32 | TokenType.F64 -> Some parseTypedStmt
-  | TokenType.LeftBrace -> Some parseBlockStmt
-  | TokenType.Print | TokenType.PrintLine -> Some parsePrintStmt
-  | TokenType.Clear -> Some parseClearStmt
-  | _ -> None
-
-let rec parseStmt = state {
-  let! parse = get
-  let! first = peek
-  let stmt = getStmtParser first
-  match stmt with
-  | Some stmt ->
-    return! stmt parseExpr parseStmt
-  | None ->
-    let! expr = parseExpr Precedence.None
-    return ExprStmt expr
 }
 
 // --- Parser ---
