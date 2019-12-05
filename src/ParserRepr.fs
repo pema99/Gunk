@@ -1,6 +1,7 @@
 module ParserRepr
 
 open LexerRepr
+open State
 
 type ExprType =
   | Void         // Empty set
@@ -84,7 +85,7 @@ let getInfixPrecedence token =
   | _                                         -> Precedence.None
 
 //Parser exceptions
-exception ParserException of string * (int * int)
+type ParserError = string * (int * int)
 
 //State of parser at any point
 type ParserState = {
@@ -93,6 +94,10 @@ type ParserState = {
   Tokens: Token list
 }
 
-//Monadic type for parser state, parser combinators
-type ParserM<'T> = State.StateM<'T, ParserState>
-type ParserCombinator = ParserM<Expr>
+type ParserResult<'T> =
+  | Success of 'T
+  | Failure
+  | FailureWith of ParserError
+  | CompoundFailure of ParserError list 
+
+type Com<'T> = StateM<ParserResult<'T>, ParserState>

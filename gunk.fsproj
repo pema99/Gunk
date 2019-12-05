@@ -11,6 +11,7 @@
     <Compile Include="src/LexerRepr.fs" />
     <Compile Include="src/Lexer.fs" />
     <Compile Include="src/ParserRepr.fs" />
+    <Compile Include="src/Combinator.fs" />
     <Compile Include="src/Parser.fs" />
   </ItemGroup>
 
