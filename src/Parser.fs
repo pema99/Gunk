@@ -52,7 +52,7 @@ let binaryExpr parseExpr left : Com<Expr> =
 let getPrefixParser token : Com<_> = com {
   match token with
   | Plus | Minus | Bang -> return unaryExpr
-  //| Identifier _ -> Some identifierExpr
+//| Identifier _ -> Some identifierExpr
   | Number _ | String _ | True | False -> return valueExpr
   | LeftParen -> return groupExpr
   | _ -> return! fail()
@@ -120,7 +120,7 @@ let parseTypedStmt parseExpr parseStmt : Com<Stmt> =
         (one RightParen)
     parmsP <+> parseBlock parseStmt
     |>> fun (parms, body) -> FuncDeclStmt (name, typed, parms, body) 
-  parseVarSignature >>= fun x -> (variableP x <|> funcP x)
+  parseVarSignature >>= fun x -> variableP x <|> funcP x
 
 let rec parseStmt : Com<Stmt> = com {
   return! 
