@@ -1,170 +1,92 @@
-﻿module Lexer
+module Lexer
+
 #nowarn "40"
 
-open LexerRepr
 open Util
-open State
+open LexerRepr
+open Combinator
+open System
 
-//Lexer exceptions
-exception LexerException of string * (int * int)
+type Lexer<'T> = Com<'T, char>
 
-//State of lexer at any point
-type LexerState = {
-  Line: int
-  Column: int
-  Source: string
-}
+let eatWhile1 pred : Lexer<string> =
+  many1 (satisfy pred) |>> String.Concat
 
-//Monadic type for lexer state
-type LexerM<'T> = StateM<'T, LexerState>
+let eatWhile pred : Lexer<string> =
+  many (satisfy pred) |>> String.Concat
 
-//Make token at current position, taking into account multi-character atoms
-let makeToken tokenType =
-  fun s ->
-    let offset = 
-      match tokenType with
-      | String str -> str.Length + 1
-      | Number num -> (string num).Length
-      | Identifier iden -> iden.Length
-      | _ -> 0
-    { Type = tokenType
-      Line = s.Line
-      Column = s.Column - offset },
-    s
+let numberP : Lexer<TokenType> = 
+  eatWhile1 (fun c -> isNumeric c || c = '.')
+  |>> float
+  |>> Number
 
-//Check if end of source is reached
-let isAtEnd : LexerM<bool> = state {
-  let! lexer = get
-  return lexer.Source.Length = 0
-}
+let stringP : Lexer<TokenType> =
+  let bodyP = 
+    eatWhile1 ((<>) '"') 
+    |>> TokenType.String
+  between (one '"') bodyP (one '"')
 
-//Advance 1 character, updating the lexers state, and return this character
-let advance : LexerM<char> = state {
-  let! lexer = get
-  let res = lexer.Source.[0]
-  let newLine = res = '\n'
-  do! set { lexer with 
-              Source = lexer.Source.[1..]
-              Line = if newLine then lexer.Line + 1 else lexer.Line
-              Column = if newLine then 1 else lexer.Column + 1 }
-  return res
-}
+let identifierP : Lexer<TokenType> =
+  (eatWhile1 isAlpha <+> eatWhile isAlphanumeric)
+  |>> uncurry (+)
+  |>> fun s ->
+    match s with
+    | Keyword k -> k
+    | _ -> Identifier s
 
-//Advance 1 character, ignore it
-let advanceIgnore : LexerM<unit> = state {
-  let! _ = advance
-  ()
-}
-
-//Peek the next character
-let peek : LexerM<char> = state {
-  let! lexer = get
-  return lexer.Source.[0]
-}
-
-//TODO: Make this tail-recursive
-//Keep advancing and appending yielded chars to a string while predicate holds
-let rec eatWhile pred : LexerM<string> = state {
-  let! atEnd = isAtEnd
-  if atEnd then 
-    return ""
-  else
-    let! peeked = peek
-    if pred peeked then
-      let! curr = advance
-      let! next = eatWhile pred
-      return string curr + next
-    else 
-      return ""
-}
-
-//Advance one identifier
-let eatIdentifier : LexerM<string> = eatWhile isAlphanumeric
-
-//Advance one numeric literal
-let eatNumber : LexerM<string> = eatWhile (fun c -> isNumeric c || c = '.')
-
-//Advance one string literal and return it
-let eatString : LexerM<string> = state {
-  let! lexer = get
-  let startPos = lexer.Line, lexer.Column
-  let! startDelim = advance 
-  let! inner = eatWhile (fun c -> c <> '"')
-  let! atEnd = isAtEnd
-  if atEnd then
-    raise <| LexerException ("Undelimited string", startPos)
-  let! endDelim = advance
-  return inner
-}
-
-//Advance one operator and return it
-let eatOperator : LexerM<Token> = state {
-  let rec matchOperator maxLen = state {
-    let! lexer = get
-    if lexer.Source.Length < maxLen then
-      return! matchOperator (maxLen-1)
-    else
-      match lexer.Source.[..maxLen-1] with
-      | Operator op ->
-        for i=0 to maxLen-1 do
-          do! advanceIgnore
-        return! makeToken op
-      | _ -> return! matchOperator (maxLen-1)
+let operatorP : Lexer<TokenType> = 
+  let rec loop acc : Lexer<TokenType> = com {
+    match acc with
+    | Operator o -> return o
+    | _ -> 
+      let! next = item
+      return! loop (acc + string next)
   }
-  return! matchOperator 3
+  satisfy (fun c -> 
+    match c with 
+    | OperatorStart -> true 
+    | InvalidOperator -> false)
+  |>> string
+  >>= loop
+
+let whitespaceP : Lexer<unit> =
+  many (satisfy isWhitespace) 
+  |>> ignore
+
+let tokenTypeP : Lexer<TokenType> =
+  let validP =
+    operatorP
+    <|> identifierP
+    <|> numberP
+    <|> stringP
+  whitespaceP *> validP
+
+let testState = {
+  Source = "i32 fib (i32 n) {
+  print 2+3
+}"
+  Line = 1
+  Column = 1
 }
 
-//Advance one language atom, skipping whitespace, and returning None if end is reached
-let rec eatAtom : LexerM<Token option> = state { 
-  let! atEnd = isAtEnd
-  if atEnd then return None
-  else
-    match! peek with
-    | OperatorStart -> 
-      let! op = eatOperator
-      return Some op
-    | Alpha c ->
-      let! iden = eatIdentifier
-      let tokenType = 
-        match iden with
-        | Keyword k -> k
-        | _ -> Identifier iden 
-      let! res = makeToken tokenType
-      return Some res
-    | Numeric c ->
-      let! num = eatNumber
-      let! res = makeToken (Number (float num))
-      return Some res
-    | '"' ->
-      let! str = eatString
-      let! res = makeToken (String str)
-      return Some res
-    | Whitespace c -> 
-      do! advanceIgnore
-      return! eatAtom
-    | c -> 
-      let! lexer = get
-      let pos = lexer.Line, lexer.Column
-      raise <| LexerException (sprintf "Invalid token '%c'" c, pos)
-      return None
-}
+let lexP : Lexer<Token list> = 
+  let tokenP : Lexer<Token> = com {
+    let! state = com.get()
+    let state = (state :?> LexerState)
+    let! tokenType = tokenTypeP
+    let res = {
+      Type = tokenType
+      Line = state.Line
+      Column = state.Column
+    }
+    return res
+  }
+  many tokenP
 
-//Run the lexer over the given source, returning a list of tokens
-let lex source =
-  let lexer = {
+let lex source = 
+  let init = {
+    Source = source
     Line = 1
     Column = 1
-    Source = source
   }
-  let rec lexCont tokens = state {
-    let! atEnd = isAtEnd
-    if atEnd then return tokens
-    else
-      let! token = eatAtom
-      match token with
-      | Some t -> return! lexCont (t :: tokens) 
-      | None -> return tokens
-  }
-  lexCont [] lexer
-    |> fst
-    |> List.rev
+  lexP init |> fst

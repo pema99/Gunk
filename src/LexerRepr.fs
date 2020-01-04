@@ -1,5 +1,31 @@
 module LexerRepr
 
+open Combinator
+
+type LexerState =
+  { Source: string
+    Line: int
+    Column: int }
+  interface CombinatorState<char> with
+    member this.Peek = com {
+      if this.Source.Length > 0 then
+        return this.Source.[0]
+      else
+        return! fail()
+    }
+    member this.Item = com {
+      if this.Source.Length > 0 then
+        let res = this.Source.[0]
+        let updated = { this with
+                          Source = this.Source.[1..]
+                          Line = if res = '\n' then this.Line + 1 else this.Line
+                          Column = if res = '\n' then 1 else this.Column + 1}
+        do! com.set (updated :> CombinatorState<char>)
+        return res
+      else
+        return! fail()
+    }
+
 type TokenType = 
   // Algebraic operators
   | Plus
@@ -139,16 +165,3 @@ let (|Keyword|_|) k =
     Some keywordMap.[k]
   else
     None
-
-//Lexer exceptions
-exception LexerException of string * (int * int)
-
-//State of lexer at any point
-type LexerState = {
-  Line: int
-  Column: int
-  Source: string
-}
-
-//Monadic type for lexer state
-type LexerM<'T> = State.StateM<'T, LexerState>

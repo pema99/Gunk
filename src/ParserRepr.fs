@@ -1,7 +1,33 @@
 module ParserRepr
 
 open LexerRepr
-open State
+open Combinator
+
+type ParserState =
+  { Tokens: Token list
+    Line: int
+    Column: int }
+  interface CombinatorState<TokenType> with
+    member this.Peek = com {
+      if this.Tokens.Length > 0 then
+        return this.Tokens.[0].Type
+      else
+        return! fail()
+    }
+    member this.Item = com {
+      if this.Tokens.Length > 0 then
+        let res = this.Tokens.[0]
+        let updated = { this with
+                          Tokens = this.Tokens.[1..]
+                          Line = res.Line
+                          Column = res.Column }
+        do! com.set (updated :> CombinatorState<TokenType>)
+        return res.Type
+      else
+        return! fail()
+    }
+
+type Parser<'T> = Com<'T, TokenType>
 
 type ExprType =
   | Void         // Empty set
@@ -20,7 +46,7 @@ type ExprType =
   | Bool
   | Struct of string
 
-let tokenToExprType token : Com<ExprType> =
+let tokenToExprType token : Parser<ExprType> =
   fun s ->
     (match token with
     | TokenType.Unit            -> Success Unit

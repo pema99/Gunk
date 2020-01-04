@@ -44,7 +44,7 @@ type CombinatorState<'T> =
 
 and Com<'T, 'S> = StateM<ParserResult<'T>, CombinatorState<'S>>
 
-type ComBuilder() =
+type CombinatorBuilder() =
   member this.Return (v: 'T) : Com<'T, 'S> =
     fun s -> Success v, s
   member this.ReturnFrom (m: Com<'T, 'S>) : Com<'T, 'S> =
@@ -70,7 +70,7 @@ type ComBuilder() =
   member this.set v =
     fun _ -> Success (), v
 
-let com = ComBuilder()
+let com = CombinatorBuilder()
 
 let ( <|> ) (m1: Com<'T, 'S>) (m2: Com<'T, 'S>) : Com<'T, 'S> = state {  
   match! m1 with
@@ -90,13 +90,13 @@ let ( <*> ) (f: Com<'T -> 'U, 'S>) (m: Com<'T, 'S>) : Com<'U, 'S> = com {
   return a b
 }
 
-let ( <&> ) (f: 'T -> 'U) (m: Com<'T, 'S>) : Com<'U, 'S> = com {
+let ( <!> ) (f: 'T -> 'U) (m: Com<'T, 'S>) : Com<'U, 'S> = com {
   let! v = m
   return f v
 }
 
 let ( |>> ) (m: Com<'T, 'S>) (f: 'T -> 'U) : Com<'U, 'S> =
-  f <&> m
+  f <!> m
 
 let ( <* ) (m1: Com<'T, 'S>) (m2: Com<'U, 'S>) : Com<'T, 'S> = com {
   let! a = m1
@@ -190,31 +190,3 @@ let oneOf (lst: 'T list) : Com<'T, 'T> =
 //  }
 //  return! loop first
 //}
-
-type IntParserState =
-  { Tokens: int list
-    Line: int
-    Column: int }
-  interface CombinatorState<int> with
-    member x.Peek = com {
-      if x.Tokens.Length > 0 then
-        return x.Tokens.[0]
-      else
-        return! fail()
-    }
-    member x.Item = com {
-      if x.Tokens.Length > 0 then
-        let res = x.Tokens.[0]
-        let updated = { x with
-                          Tokens = x.Tokens.[1..] }
-        do! com.set (updated :> CombinatorState<int>)
-        return res
-      else
-        return! fail()
-    }
-
-let test = {
-  Tokens = [1; 2; 3]
-  Line = 1
-  Column = 1
-}

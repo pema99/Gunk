@@ -6,50 +6,52 @@ open LexerRepr
 open ParserRepr
 open Combinator
 open Util
-open State
 
 // --- Expression combinators ---
-let numberExpr : Com<Expr> =
-  numberP
+let identifierP : Parser<TokenType> =
+  satisfy (fun x -> match x with Identifier _ -> true | _ -> false)
+
+let numberExpr : Parser<Expr> =
+  satisfy (fun x -> match x with Number _ -> true | _ -> false)
   |>> fun (Number n) -> NumberExpr n
 
-let boolExpr : Com<Expr> =
+let boolExpr : Parser<Expr> =
   oneOf [True; False]
   |>> fun b -> match b with True -> BoolExpr true | False -> BoolExpr false
 
-let stringExpr : Com<Expr> =
-  stringP
+let stringExpr : Parser<Expr> =
+  satisfy (fun x -> match x with String _ -> true | _ -> false)
   |>> fun (String s) -> StringExpr s
 
-let valueExpr _ : Com<Expr> =
+let valueExpr _ : Parser<Expr> =
   numberExpr <|> boolExpr <|> stringExpr
 
-let groupExpr expr : Com<Expr> =
-  one LeftParen *> expr Precedence.None <* one RightParen
+let groupExpr parseExpr : Parser<Expr> =
+  one LeftParen *> parseExpr Precedence.None <* one RightParen
 
-let unaryOp op parseExpr : Com<Expr> =
+let unaryOp op parseExpr : Parser<Expr> =
   fun x -> UnaryExpr (op, x)
-  <&> one op
+  <!> one op
   *> parseExpr Precedence.None
 
-let unaryExpr parseExpr : Com<Expr> =
+let unaryExpr parseExpr : Parser<Expr> =
   unaryOp Bang parseExpr
   <|> unaryOp Minus parseExpr
   <|> unaryOp Plus parseExpr
 
-let binaryOp op parseExpr left : Com<Expr> =
+let binaryOp op parseExpr left : Parser<Expr> =
   one op
   *> parseExpr (getInfixPrecedence op)
   |>> fun x -> BinaryExpr (left, op, x)
 
-let binaryExpr parseExpr left : Com<Expr> =
+let binaryExpr parseExpr left : Parser<Expr> =
   binaryOp Plus parseExpr left
   <|> binaryOp Minus parseExpr left
   <|> binaryOp Asterisk parseExpr left
   <|> binaryOp Slash parseExpr left
 
 // --- Expression parsing ---
-let getPrefixParser token : Com<_> = com {
+let getPrefixParser token : Parser<_> = com {
   match token with
   | Plus | Minus | Bang -> return unaryExpr
 //| Identifier _ -> Some identifierExpr
@@ -58,17 +60,17 @@ let getPrefixParser token : Com<_> = com {
   | _ -> return! fail()
 }
 
-let getOtherfixParser token : Com<_> = com {
+let getOtherfixParser token : Parser<_> = com {
   match token with
   | Plus | Minus | Asterisk | Slash -> return binaryExpr
   | _ -> return! fail()
 }
 
-let rec parseExpr prec : Com<Expr> = com {
+let rec parseExpr prec : Parser<Expr> = com {
   let! first = look
   let! prefix = getPrefixParser first
   let! left = prefix parseExpr
-  let rec loop (left: Expr) : Com<Expr> = com {
+  let rec loop (left: Expr) : Parser<Expr> = com {
     let! cont = check (fun x -> prec < getInfixPrecedence x)
     if cont then
       let! next = look
@@ -81,7 +83,7 @@ let rec parseExpr prec : Com<Expr> = com {
 }
 
 // --- Statement parsing ---
-let parseVarSignature : Com<string * ExprType> =
+let parseVarSignature : Parser<string * ExprType> =
   let typeTokens = [
     TokenType.U8; TokenType.U16; TokenType.U32; TokenType.U64
     TokenType.I8; TokenType.I16; TokenType.I32; TokenType.I64
@@ -92,22 +94,22 @@ let parseVarSignature : Com<string * ExprType> =
   let iden = identifierP |>> fun (Identifier n) -> n 
   typed <+> iden |>> flip 
 
-let parseBlock parseStmt : Com<Stmt list> =
+let parseBlock parseStmt : Parser<Stmt list> =
   one LeftBrace *> many parseStmt <* one RightBrace
 
-let parseBlockStmt parseStmt : Com<Stmt> =
-  BlockStmt <&> parseBlock parseStmt
+let parseBlockStmt parseStmt : Parser<Stmt> =
+  BlockStmt <!> parseBlock parseStmt
 
-let parsePrintStmt parseExpr : Com<Stmt> =
+let parsePrintStmt parseExpr : Parser<Stmt> =
   let printP t b =
     one t *> parseExpr Precedence.None
     |>> fun x -> PrintStmt(b, x)
   printP Print false <|> printP PrintLine true
 
-let parseClearStmt : Com<Stmt> =
+let parseClearStmt : Parser<Stmt> =
   one Clear |>> fun _ -> ClearStmt  
 
-let parseTypedStmt parseExpr parseStmt : Com<Stmt> =
+let parseTypedStmt parseExpr parseStmt : Parser<Stmt> =
   let variableP (name, typed) =
     one Equal
     *> parseExpr Precedence.None
@@ -122,7 +124,7 @@ let parseTypedStmt parseExpr parseStmt : Com<Stmt> =
     |>> fun (parms, body) -> FuncDeclStmt (name, typed, parms, body) 
   parseVarSignature >>= fun x -> variableP x <|> funcP x
 
-let rec parseStmt : Com<Stmt> = com {
+let rec parseStmt : Parser<Stmt> = com {
   return! 
     parseBlockStmt parseStmt
     <|> parseTypedStmt parseExpr parseStmt
@@ -131,25 +133,31 @@ let rec parseStmt : Com<Stmt> = com {
     <|> (parseExpr Precedence.None |>> ExprStmt)
 }
 
-let parse = many parseStmt
+let parseP = many parseStmt
 
-let test = {
-  Tokens = Lexer.lex "
-i32 fib (i32 n) {
-  print 2+3
+let parse tokens = 
+  let init = {
+    Tokens = tokens
+    Line = 1
+    Column = 1
+  }
+  parseP init |> fst
+
+//Test
+let tokens = Lexer.lex "
+i8 a = 2 + 3
+u8 b = 3 * 2
+i32 fib (i32 lmao, u32 test) {
+  i32 c = 2
+  2 + 5
+  println (5+2)
 }"
-  Line = 1
-  Column = 1
-}
 
-
-parse test |> printfn "%A"
+match tokens with
+| Success v -> parse v |> printfn "%A"
+| _ -> printfn "Lexer failure"
 
 (*
-let parser = {
-  Line = 1
-  Column = 1
-  Tokens = Lexer.lex "
 i8 a = 2 + 3
 u8 b = 3 * 2
 i32 fib(i32 lmao, u32 test) {
@@ -161,7 +169,8 @@ i32 fib(i32 lmao, u32 test) {
   fib(1,2)
   println (5+2)
 }
-"
-}
+*)
 
-parse parser |> printfn "%A" *)
+//TODO:
+//Parse function calls
+//Parse identifier expressions
