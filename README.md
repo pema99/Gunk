@@ -1,4 +1,6 @@
 # Gunk
+Note: This project is abandoned but has been salvaged into a library: https://github.com/pema99/plonk. Excuse my terrible memes, I don't expect anyone to actually read this stuff.
+
 What's up gamers? Coming back at you again with yet another bad language brought to you by me, the absolute god of making bad languages.
 It's gonna be functional this time though, woo.
 
