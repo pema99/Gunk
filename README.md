@@ -23,33 +23,3 @@ git clone https://github.com/pema99/Gunk
 cd Gunk
 dotnet run
 ```
-
-# Bottom-of-the-repo meme
-You know what time it is.
-```
-Person A: Want to hear a UDP joke?
-Person B: Sure.
-Person A: To get to the other side.
-```
-
-         
-```
-⠀⠀⠀⠀⡠⠔⠒⠉⢉⣉⣙⣒⣠⣀
-⠀⠀⠀⢠⠊⠐⡞⢩⣭⣭⣭⣀⡔⣒⡚⠇        Hee haw, funny meme amirite.
-⠀⠀⠠⠁⠀⠀⠉⢿⡘⠃⣸⠃⠓⠒⢦⠌⢦⡀         What's up guys it Peter here to explain the joke. 
-⠀⢀⠇⠀⠀⠀⠀⠠⢍⡉⠁⠐⠦⠤⠞⡀⠀⠀⢣        So the joke is that with UDP packets are not guaranteed
-⠀⠘⠀⠀⠀⠀⠀⠀⠀⠈⠉⠙⠛⠉⠉⢳⠄⠀⠸⡆       to be received in the correct order or even at all.
-⠀⡆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣐⠁⠀⠀⠀⠀⡇       When Person A says "To get the other side." he is
-⠀⡇⠀⠀⠀⠀⠀⠀⠀⡄⠀⠀⠀⠀⠀⠹⡄⠀⠀⠀⡇       referring to the common english joke of the chicken
-⡠⡇⠀⠀⠀⠀⠀⠀⠀⢷⣄⣀⡴⣤⣀⠴⠁⠀⠀⡇       wanting to cross the road. The reason why he doesn't tell 
-⢣⠘⠢⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⠏       the start of the joke is to draw a parallel to the fact
-⠀⠑⣄⠈⠢⢀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡠⠊⡰       that UDP packets aren't always received.
-⠀⠀⠈⠑⢄⡀⠁⠢⢄⡀⠀⠀⠀⠀⠀⢀⡠⠒⢁⠔
-⠀⠀⠀⠀⠀⠈⠒⠤⣀⠀⠉⠒⡂⢤⡰⠫⣄⡰⠃
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠒⠼⠀⠠⡷⡀⠈
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠱
-```
-
-Q: What's a monad?
-
-A: Nobody knows for sure
