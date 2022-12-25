@@ -1,5 +1,5 @@
 # Gunk
-Note: This project is abandoned but has been salvaged into a library: https://github.com/pema99/plonk. Excuse my terrible memes, I don't expect anyone to actually read this stuff.
+Note: This project is abandoned but has been salvaged into a library: https://github.com/pema99/plonk.
 
 # How to build
 ```sh
